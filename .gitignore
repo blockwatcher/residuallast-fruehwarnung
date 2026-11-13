@@ -1,0 +1,9 @@
+__pycache__/
+# Laufzeitzustand, jederzeit aus den APIs neu erzeugbar
+report.json
+state.json
+load-profile.json
+validation-actuals.json
+.skill-cache/
+drop/
+daten/

@@ -1,0 +1,47 @@
+# Dunkelflaute-/Strompreis-Frühwarnung — Lovelace-Karte
+# Nutzt nur native HA-Karten (kein HACS/ApexCharts nötig).
+# Speist sich aus sensor.dunkelflaute_status + sensor.residuallast_prognose_max
+# (die der 6h-Task via REST pusht).
+# Einfügen: Dashboard → "Karte hinzufügen" → "Manuell" → diesen Block einfügen.
+type: vertical-stack
+cards:
+  - type: markdown
+    content: >
+      ## ⚡ Strompreis-Frühwarnung
+
+      **Status:** {% set b = states('sensor.dunkelflaute_status') %}{{
+      {'günstig':'🟢 günstig','normal':'⚪ normal','erhöht':'🟠 erhöht','hoch':'🔴
+      hoch'}.get(b, b) }}
+
+
+      {{ state_attr('sensor.dunkelflaute_status','recommendation') }}
+
+  - type: markdown
+    content: >
+      ### 5-Tage-Vorschau (Residuallast = Preistreiber)
+
+      | Tag | Peak-Residuallast | Ø Erneuerbar | Band |
+
+      |:--|--:|--:|:--|
+
+      {% for r in state_attr('sensor.dunkelflaute_status','prognose') -%}
+      | {{ r.day }} | {{ r.peak_resid }} GW | {{ r.avg_share }} % | {{
+      {'günstig':'🟢','normal':'⚪','erhöht':'🟠','hoch':'🔴'}.get(r.band,'') }} {{
+      r.band }} |
+      {% endfor %}
+
+      _Kalibrierung k={{ state_attr('sensor.dunkelflaute_status','kalibrierung_k')
+      }} · energy-charts Ø-Anteil {{
+      state_attr('sensor.dunkelflaute_status','energy_charts_ren_share_avg') }} %_
+
+  - type: gauge
+    entity: sensor.residuallast_prognose_max
+    name: Peak-Residuallast (5 Tage)
+    unit: GW
+    min: 20
+    max: 70
+    needle: true
+    severity:
+      green: 20
+      yellow: 48
+      red: 55
