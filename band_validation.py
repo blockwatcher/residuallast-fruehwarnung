@@ -119,6 +119,9 @@ def snapshot():
             "ens_p90": (r.get("ensemble") or {}).get("p90"),
             "ens_p_warn": (r.get("ensemble") or {}).get("p_warn"),
             "ens_unentscheidbar": (r.get("ensemble") or {}).get("unentscheidbar"),
+            # Relative Einstufung, Ausloeser seit 13.11.2026.
+            "rel_cut": (r.get("rel") or {}).get("cut"),
+            "rel_warn": (r.get("rel") or {}).get("warn"),
             "min_share": r.get("min_share"), "avg_share": r.get("avg_share"),
             "epex_max": e.get("max"), "epex_mean": e.get("mean"),
             "epex_is_forecast": (not e.get("known")) if e else None,

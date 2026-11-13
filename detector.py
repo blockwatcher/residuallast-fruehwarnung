@@ -183,6 +183,63 @@ WIND_80_TO_100={"Nord/Kueste":1.031,"Ostsee":1.111,"Hannover":1.163,
                 "NRW":1.026,"Frankfurt":1.156,"Muenchen":1.132}
 
 
+# Ausloeser seit 13.11.2026: RELATIVE Einstufung des Tagesmittels.
+#
+# Ein Tag wird gemeldet, wenn sein prognostiziertes Residuallast-Tagesmittel
+# ueber dem 80-%-Quantil der Prognosen GLEICHEN VORLAUFS fuer die 28 Tage davor
+# liegt. Gleicher Vorlauf, damit der Versatz des Modells (und sein Wachsen mit
+# dem Vorlauf) aus dem Vergleich herausfaellt.
+#
+# Warum weg von der festen 42-GW-Spitze: Sie war auf 45 Sommertagen gefittet und
+# ist saisonabhaengig — im September lagen 22 % der Prognosen darueber, im
+# November 71 %. Zudem verschiebt sich der Preis bei gleicher Residuallast mit
+# dem Brennstoffpreis (Okt/Nov rund 40 EUR/MWh ueber Jul/Aug). Abgleich am
+# Live-Protokoll (abgleich_relativ.py, Vorlauf 2-4, 15.09.-12.11., 171 Paare):
+#     Ausloeser                         F1    Praezision  Warnquote
+#     Ensemble >= 70 % ueber 42 GW     0,70     0,73        39 %
+#     fest: Spitze >= 42 GW            0,76     0,77        43 %
+#     relativ: Tagesmittel > P80       0,79     0,90        34 %
+# Der Anstoss kam aus dem Akkudoktor-Forum (Zwei-Jahres-Rueckblick, dort war die
+# relative Einstufung der groesste Einzelschritt).
+#
+# Folge, die man kennen muss: "teuer" heisst jetzt teuer GEGENUEBER DEN LETZTEN
+# VIER WOCHEN. Die Warnquote liegt damit zu jeder Jahreszeit bei grob einem
+# Fuenftel der Tage — auch im Sommer, wenn die Preise absolut niedrig sind.
+#
+# Die Historie kommt aus validation-forecasts.jsonl (band_validation.py, taeglich).
+# Reicht sie nicht, gilt wie zuvor das Ensemble bzw. das Band.
+REL_FILE=os.path.join(HERE,"validation-forecasts.jsonl")
+REL_WINDOW_DAYS=28
+REL_QUANTILE=0.80
+REL_MIN_HISTORY=14
+
+
+def relative_cuts(rows,today):
+    """{Tag -> {"cut","n","lead"}} — Schwelle je Prognosetag, oder leer.
+
+    Je (Tag, Vorlauf) zaehlt der letzte protokollierte Lauf. Fehlt das Protokoll
+    oder reicht die Historie fuer einen Tag nicht, fehlt der Tag im Ergebnis.
+    """
+    hist={}
+    try:
+        with open(REL_FILE,encoding="utf-8") as fh:
+            for line in fh:
+                try: x=json.loads(line)
+                except ValueError: continue
+                if x.get("mean_resid") is None: continue
+                hist[(x["day"],x["lead_days"])]=x["mean_resid"]
+    except OSError as ex:
+        print("Relative Einstufung: Protokoll nicht lesbar (%s)"%ex); return {}
+    out={}
+    for r in rows:
+        d=datetime.date.fromisoformat(r["day"]); lead=(d-today).days
+        vals=sorted(hist[k] for k in (((d-datetime.timedelta(days=i)).isoformat(),lead)
+                                      for i in range(1,REL_WINDOW_DAYS+1)) if k in hist)
+        if len(vals)>=REL_MIN_HISTORY:
+            out[r["day"]]={"cut":round(quantile(vals,REL_QUANTILE),1),"n":len(vals),"lead":lead}
+    return out
+
+
 def quantile(sorted_vals,q):
     if not sorted_vals: return None
     i=q*(len(sorted_vals)-1); lo=int(i); hi=min(lo+1,len(sorted_vals)-1)
@@ -418,7 +475,15 @@ def main():
             e=ens.get(r["day"])
             if e: r["ensemble"]=e
 
-    # Ausgeloest wird jetzt ueber die WAHRSCHEINLICHKEIT, nicht ueber das Band.
+    # Relative Einstufung des Tagesmittels (siehe Kommentar bei REL_FILE).
+    cuts=relative_cuts(rows,datetime.datetime.now(TZ).date())
+    for r in rows:
+        c=cuts.get(r["day"])
+        if c: r["rel"]=dict(c,warn=r["mean_resid"]>c["cut"])
+    rel_ok=bool(rows) and all("rel" in r for r in rows)
+
+    # Bis 13.11.2026 wurde ueber die Ensemble-WAHRSCHEINLICHKEIT ausgeloest. Das
+    # bleibt als Rueckfall, wenn die Historie fuer die relative Einstufung fehlt.
     #
     # Grund (forecast_skill.py, 45 Tage): Die Bandzuordnung stimmte schon bei
     # einem Tag Vorlauf nur zu 43 % mit der Analyse ueberein, weil der MAE von
@@ -428,7 +493,9 @@ def main():
     #
     # Faellt das Ensemble aus, gilt wieder das Band: lieber die alte,
     # unzuverlaessige Warnung als gar keine.
-    if ens:
+    if rel_ok:
+        flagged=[r for r in rows if r["rel"]["warn"]]
+    elif ens:
         flagged=[r for r in rows
                  if r.get("ensemble",{}).get("p_warn",0)>=ALERT_P]
     else:
@@ -468,6 +535,10 @@ def main():
         und mehrere als Aufzaehlung sauber lesbar sind."""
         dd=datetime.date.fromisoformat(r["day"])
         tag="*%s %s*"%(WD[dd.weekday()],dd.strftime("%d.%m."))
+        if rel_ok:
+            return tag,("im Vergleich zu den letzten vier Wochen teure Preise zu "
+                        "erwarten (Residuallast im Tagesmittel ~%.0f GW, Schwelle "
+                        "%.0f GW)"%(r["mean_resid"],r["rel"]["cut"]))
         e=r.get("ensemble")
         if e:
             sicher=("ziemlich sicher" if e["p_warn"]>=90 else
@@ -485,6 +556,9 @@ def main():
     def entwarnung_zeile(r):
         dd=datetime.date.fromisoformat(r["day"])
         tag="*%s %s*"%(WD[dd.weekday()],dd.strftime("%d.%m."))
+        if rel_ok:
+            return tag,("Residuallast im Tagesmittel nur noch ~%.0f GW, Schwelle "
+                        "%.0f GW"%(r["mean_resid"],r["rel"]["cut"]))
         e=r.get("ensemble")
         if e:
             return tag,("nur noch %d%% der Wettermodelle, Residuallast %.0f–%.0f GW"
@@ -519,19 +593,23 @@ def main():
                "updated":datetime.datetime.utcnow().isoformat()+"Z"},open(STATE_FILE,"w"))
     worst_band=max([r["band"] for r in rows],key=lambda b:["günstig","normal","erhöht","hoch"].index(b))
     report={"generated":datetime.datetime.utcnow().isoformat()+"Z","k":round(k,2),"anchor":anchor,
+            "trigger":"relativ" if rel_ok else ("ensemble" if ens else "band"),
             "days":rows,"flagged":flagged,"alert_needed":alert_needed,"alert_text":alert_text,
             "worst_band":worst_band,"series":[{"t":s["t"],"resid":s["resid"],"ren":s["ren"],"L":s["L"]} for s in series]}
     json.dump(report,open(REPORT,"w"),ensure_ascii=False,indent=2)
     # HA push
     push_ha(rows,worst_band,flagged,alert_text,anchor,k)
     # Konsole
-    print("k=%.2f  anchor=%s  worst_band=%s  alert_needed=%s"%(k,anchor,worst_band,alert_needed))
+    print("k=%.2f  anchor=%s  worst_band=%s  alert_needed=%s  ausloeser=%s"%(
+        k,anchor,worst_band,alert_needed,report["trigger"]))
     for r in rows:
         e=r.get("ensemble")
         ens=(" | Ensemble %5.1f–%-5.1f GW  P(Warnung) %3d%%%s"%(
                 e["p10"],e["p90"],e["p_warn"]," ?" if e["unentscheidbar"] else "")) if e else ""
-        print("  %s  Peak %5.1f GW %-8s | Ø-EE %5.1f%%%s"%(
-            r["day"],r["peak_resid"],r["band"],r["avg_share"],ens))
+        rel=(" | Mittel %5.1f GW, Schwelle %5.1f%s"%(
+                r["mean_resid"],r["rel"]["cut"]," WARN" if r["rel"]["warn"] else "")) if "rel" in r else ""
+        print("  %s  Peak %5.1f GW %-8s | Ø-EE %5.1f%%%s%s"%(
+            r["day"],r["peak_resid"],r["band"],r["avg_share"],rel,ens))
     print("ALERT_TEXT:",(alert_text or "(keiner)"))
 
 def hass_token():

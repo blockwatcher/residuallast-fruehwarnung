@@ -31,9 +31,14 @@ Schwächen stehen unten; wer das nachbaut, sollte sie vorher lesen.
 4. **Kalibrierung:** Ein Faktor `k` auf Solar und Wind, so gewählt, dass der
    Erneuerbaren-Anteil der ersten 24 Stunden zu `ren_share_forecast` von
    energy-charts passt.
-5. **Unsicherheit:** Dieselbe Rechnung für die 40 Mitglieder des
-   ICON-EPS-Ensembles. Gewarnt wird, wenn mindestens 70 % der Mitglieder über
-   42 GW Tagesspitze liegen.
+5. **Auslöser:** Gewarnt wird, wenn das prognostizierte Tagesmittel der
+   Residuallast über dem 80-%-Quantil der Prognosen gleichen Vorlaufs für die
+   28 Tage davor liegt. Die Historie kommt aus `validation-forecasts.jsonl`;
+   `band_validation.py` muss dafür täglich laufen.
+6. **Unsicherheit:** Dieselbe Rechnung für die 40 Mitglieder des
+   ICON-EPS-Ensembles, als Streuband im Report. Bis zum 13.11.2026 war das
+   Ensemble der Auslöser (mindestens 70 % der Mitglieder über 42 GW
+   Tagesspitze); das gilt weiter als Rückfall, wenn die Historie fehlt.
 
 ## Dateien
 
@@ -91,8 +96,8 @@ teuer = Tagesmittelpreis über dem 80-%-Quantil der letzten 28 Tage):
 | Auslöser | F1 | Präzision | Warnquote |
 |---|---|---|---|
 | fest: Spitze ≥ 42 GW | 0,76 | 0,77 | 43 % |
-| Ensemble ≥ 70 % über 42 GW (aktueller Alarm) | 0,70 | 0,73 | 39 % |
-| relativ: Tagesmittel über P80 der letzten 28 Tage | 0,79 | 0,90 | 34 % |
+| Ensemble ≥ 70 % über 42 GW (Auslöser bis 13.11.2026) | 0,70 | 0,73 | 39 % |
+| relativ: Tagesmittel über P80 der letzten 28 Tage (Auslöser seit 13.11.2026) | 0,79 | 0,90 | 34 % |
 | EpexPredictor | 0,83 | 0,83 | 44 % |
 
 In diesem Zeitraum stiegen die Preise durchgehend, 25 von 58 Tagen gelten als
@@ -100,12 +105,15 @@ teuer. Die Werte sind deshalb nur untereinander vergleichbar.
 
 ## Bekannte Schwächen
 
-- **Die feste 42-GW-Schwelle ist saisonabhängig.** Sie wurde auf 45 Sommertagen
-  gefittet. Im November 2026 lag der Alarm an 71 % der Prognosen über der
-  Schwelle, im September an 22 %. Eine relative Einstufung des Tagesmittels
-  trennt besser; umgebaut ist das noch nicht.
-- **Der Ensemble-Alarm ist als Auslöser nicht besser als die schlichte
-  Schwelle.** Er liefert eine Unsicherheitsangabe, mehr bisher nicht.
+- **„Teuer" heißt teuer gegenüber den letzten vier Wochen.** Die relative
+  Einstufung warnt zu jeder Jahreszeit an grob einem Fünftel der Tage, auch im
+  Sommer bei absolut niedrigen Preisen. Sie ersetzt seit dem 13.11.2026 die
+  feste 42-GW-Schwelle, die auf 45 Sommertagen gefittet war und im November an
+  71 % der Prognosen überschritten wurde (September: 22 %).
+- **Die relative Einstufung ist erst an zwei Herbstmonaten geprüft.** Der
+  Vorsprung vor der festen Schwelle ist in diesem Zeitraum nicht gesichert.
+- **Das Ensemble war als Auslöser nicht besser als die schlichte Schwelle.** Es
+  liefert eine Unsicherheitsangabe, mehr bisher nicht.
 - **Der Wind-Flottenfaktor 0,44 ist ein Sommerwert.** Er stammt aus der
   gemessenen Spitze eines 30-Tage-Fensters im Sommer (35,6 GW); im Herbst lag
   die Spitze bei 53,6 GW. Die Kalibrierung fängt das auf (`k` stieg von 0,97
